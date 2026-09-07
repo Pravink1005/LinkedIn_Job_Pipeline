@@ -1,4 +1,4 @@
-from ml_predictor import predict_job_details
+from ml_predictor import extract_experience_years, extract_skills, extract_skills_structured, predict_job_details
 
 
 job_description = """ 
@@ -55,3 +55,12 @@ print("Predicted Degree:",
 
 print("Predicted Specialization:",
       result["predicted_specialization"])
+
+print("Extracted Skills:",
+      extract_skills(job_description))
+
+print("Skills by Category:",
+      extract_skills_structured(job_description))
+
+print("Experience (Min, Max):",
+      extract_experience_years(job_description))

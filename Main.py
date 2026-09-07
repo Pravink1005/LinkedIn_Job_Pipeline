@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import joblib
 from scrapling import Fetcher, StealthyFetcher
-from ml_predictor import predict_job_details
+from ml_predictor import extract_experience_years, extract_skills, predict_job_details
 
 # ============================================================
 # LOAD TRAINED ML ARTIFACTS
@@ -94,49 +94,10 @@ def save_seen_jobs(seen_set):
 # FEATURE ENGINEERING & QUALIFICATION EXTRACTION
 # ============================================================
 
-SKILL_PATTERNS = {
-    "Python": r"\bpython\b",
-    "SQL": r"\bsql\b|\bpostgresql\b|\bmysql\b",
-    "R": r"(?:\b|_)r(?:-lang|lang)?(?:\b|_)",
-    "Java": r"\bjava\b",
-    "Spark": r"\bspark\b|\bpyspark\b",
-    "Airflow": r"\bairflow\b",
-    "AWS": r"\baws\b|\bamazon web services\b",
-    "Azure": r"\bazure\b",
-    "GCP": r"\bgcp\b|\bgoogle cloud\b",
-    "Power BI": r"\bpower bi\b|\bpowerbi\b",
-    "Tableau": r"\btableau\b",
-}
-
 def clean_text_for_ml(text):
     text = str(text).lower()
     text = re.sub(r"[^a-zA-Z0-9\s\.-]", " ", text)
     return " ".join(text.split())
-
-def extract_skills(text):
-    if not text or text == "N/A":
-        return "Not Specified"
-    found = [skill for skill, pattern in SKILL_PATTERNS.items() if re.search(pattern, text.lower())]
-    return ", ".join(found) if found else "Not Specified"
-
-def extract_experience_years(text):
-    if not text or text == "N/A":
-        return "Not Specified", "Not Specified"
-    patterns = [
-        r"(\d+)\s*(?:to|-|–)\s*(\d+)\s*(?:years?|yrs?)",       # e.g., "8-12 years"
-        r"(\d+)\+\s*(?:years?|yrs?)",                         # e.g., "5+ years"
-        r"(\d+)\s*(?:years?|yrs?)\s+of\s+experience",         # e.g., "4 years of experience"
-        r"(?:at least|minimum|min)\s*(\d+)\s*(?:years?|yrs?)", # e.g., "minimum 3 years"
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            groups = match.groups()
-            if len(groups) == 2 and groups[1]:
-                return groups[0], groups[1]
-            elif len(groups) >= 1 and groups[0]:
-                return groups[0], f"{groups[0]}+"
-    return "Not Specified", "Not Specified"
 
 def extract_qualification_text(text):
     if not text or text == "N/A":

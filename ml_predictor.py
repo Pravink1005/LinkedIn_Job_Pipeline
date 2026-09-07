@@ -29,6 +29,159 @@ specialization_vectorizer = safe_load_model(MODEL_DIR / "specialization_vectoriz
 specialization_model = safe_load_model(MODEL_DIR / "specialization_model.pkl")
 
 
+SKILL_CATALOG = {
+    "programming_languages": {
+        "Python": ["python"],
+        "SQL": ["sql", "sql server", "t-sql", "pl/sql"],
+        "R": ["r programming", "r language"],
+        "Java": ["java"],
+        "JavaScript": ["javascript", "js"],
+        "TypeScript": ["typescript", "ts"],
+        "Node.js": ["node.js", "nodejs", "node js"],
+        "PHP": ["php"],
+        "C#": ["c#", "c sharp", "csharp"],
+        "C++": ["c++", "cpp"],
+        ".NET": [".net", "dotnet"],
+    },
+    "frameworks_and_apis": {
+        "React": ["react", "react.js", "reactjs"],
+        "Angular": ["angular", "angular.js", "angularjs"],
+        "Vue.js": ["vue", "vue.js", "vuejs"],
+        "Django": ["django"],
+        "Flask": ["flask"],
+        "FastAPI": ["fastapi", "fast api"],
+        "Spring": ["spring", "spring boot"],
+        "REST APIs": ["rest api", "rest apis", "restful api", "api development"],
+        "GraphQL": ["graphql"],
+        "Microservices": ["microservices", "micro-services"],
+    },
+    "data_and_ai": {
+        "Pandas": ["pandas"],
+        "NumPy": ["numpy"],
+        "Spark": ["spark", "apache spark"],
+        "PySpark": ["pyspark"],
+        "Airflow": ["airflow", "apache airflow"],
+        "ETL": ["etl", "extract transform load"],
+        "ELT": ["elt", "extract load transform"],
+        "Data Warehousing": ["data warehouse", "data warehousing"],
+        "Data Modeling": ["data modeling", "data modelling"],
+        "Machine Learning": ["machine learning", "ml"],
+        "Deep Learning": ["deep learning"],
+        "Natural Language Processing": ["natural language processing", "nlp"],
+        "Generative AI": ["generative ai", "genai"],
+        "LLMs": ["llm", "llms", "large language model", "large language models"],
+        "Computer Vision": ["computer vision"],
+    },
+    "databases": {
+        "PostgreSQL": ["postgresql", "postgres"],
+        "MySQL": ["mysql"],
+        "Microsoft SQL Server": ["sql server", "mssql"],
+        "Oracle Database": ["oracle database", "oracle db"],
+        "MongoDB": ["mongodb", "mongo db"],
+        "Redis": ["redis"],
+        "Elasticsearch": ["elasticsearch", "elastic search"],
+    },
+    "cloud_and_devops": {
+        "AWS": ["aws", "amazon web services"],
+        "Azure": ["azure", "microsoft azure"],
+        "GCP": ["gcp", "google cloud", "google cloud platform"],
+        "Docker": ["docker", "containerization", "containerisation"],
+        "Kubernetes": ["kubernetes", "k8s"],
+        "Terraform": ["terraform"],
+        "CI/CD": ["ci/cd", "continuous integration", "continuous delivery", "continuous deployment"],
+        "Git": ["git", "github", "gitlab", "bitbucket"],
+        "Linux": ["linux"],
+    },
+    "business_and_analytics": {
+        "Power BI": ["power bi", "powerbi"],
+        "Tableau": ["tableau"],
+        "Excel": ["excel", "microsoft excel"],
+        "Statistics": ["statistics", "statistical analysis"],
+        "A/B Testing": ["a/b testing", "ab testing", "split testing"],
+        "Forecasting": ["forecasting", "forecast models"],
+        "Business Analysis": ["business analysis", "business analyst"],
+    },
+    "professional_skills": {
+        "Communication": ["communication skills", "written communication", "verbal communication"],
+        "Leadership": ["leadership", "team leadership", "people management"],
+        "Problem Solving": ["problem solving", "problem-solving", "troubleshooting"],
+        "Project Management": ["project management", "project manager"],
+        "Agile": ["agile", "scrum", "kanban"],
+    },
+}
+
+
+def _skill_pattern(alias):
+    escaped = re.escape(alias).replace(r"\ ", r"\s+")
+    return rf"(?<!\w){escaped}(?!\w)"
+
+
+def extract_skills_structured(text):
+    if not text or text == "N/A":
+        return {}
+
+    structured = {}
+    for category, skills in SKILL_CATALOG.items():
+        matches = {}
+        for skill, aliases in skills.items():
+            evidence = next(
+                (alias for alias in aliases if re.search(_skill_pattern(alias), text, re.IGNORECASE)),
+                None,
+            )
+            if evidence:
+                matches[skill] = evidence
+        if matches:
+            structured[category] = matches
+    return structured
+
+
+def extract_skills(text):
+    structured = extract_skills_structured(text)
+    found = [skill for skills in structured.values() for skill in skills]
+    return ", ".join(found) if found else "Not Specified"
+
+
+def extract_experience_years(text):
+    if not text or text == "N/A":
+        return "Not Specified", "Not Specified"
+
+    normalized_text = str(text).replace("–", "-").replace("—", "-")
+    number = r"\d+(?:\.\d+)?"
+    patterns = [
+        rf"({number})\s*(?:to|-)\s*({number})\s*(?:years?|yrs?)",
+        rf"(?:at least|minimum|min)\s*({number})\s*(?:years?|yrs?)",
+        rf"({number})\s*\+\s*(?:years?|yrs?)",
+        rf"({number})\s*(?:years?|yrs?)\s+of\s+experience",
+        rf"experience\s*[:=-]\s*({number})\s*(?:years?|yrs?)",
+    ]
+
+    candidate_context = re.compile(
+        r"\b(?:experience|experienced|candidate|role|position|developer|analyst|"
+        r"engineer|consultant|professional|working|employment|years?\s+in)\b",
+        re.IGNORECASE,
+    )
+    company_context = re.compile(
+        r"\b(?:founded|established|company history|years?\s+in\s+business|"
+        r"operating|serving|organization|employees|revenue|industry)\b",
+        re.IGNORECASE,
+    )
+    sentences = re.split(r"\r?\n+|(?<=[.!?])\s+", normalized_text)
+
+    for sentence in sentences:
+        if not candidate_context.search(sentence) or company_context.search(sentence):
+            continue
+        for pattern in patterns:
+            match = re.search(pattern, sentence, re.IGNORECASE)
+            if not match:
+                continue
+            values = match.groups()
+            if len(values) == 2:
+                return values[0], values[1]
+            return values[0], f"{values[0]}+"
+
+    return "Not Specified", "Not Specified"
+
+
 # ==============================
 # EXPLICIT DEGREE PATTERNS
 # ==============================
@@ -88,6 +241,7 @@ DEGREE_PATTERNS = {
     "Any Bachelor's Degree": [
         r"\bBachelor'?s\s+or\s+Master'?s\s+degree\b",
         r"\bBachelor'?s\s+or\s+associate\s+degree\b",
+        r"\bBachelor(?:'s)?\s+or\s+associate\s+degree\b",
         r"\bBachelor(?:'s)?\s+degree\b",
         r"\bBachelor'?s\s+degree\b",
         r"\bBachelor'?s\s+qualification\b",
