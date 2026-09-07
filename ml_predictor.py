@@ -90,6 +90,7 @@ DEGREE_PATTERNS = {
     ],
     "Any Bachelor's Degree": [
         r"\bBachelor'?s\s+or\s+Master'?s\s+degree\b",
+        r"\bBachelor'?s\s+or\s+associate\s+degree\b",
         r"\bBachelor'?s\s+degree\b",
         r"\bBachelor'?s\s+qualification\b",
         r"\bAny\s+recognized\s+Bachelor'?s\s+degree\b",
@@ -237,11 +238,24 @@ GENERIC_AI_EXCLUDES = [
 ]
 
 
+def extract_specialization_text(job_description):
+    if not job_description or not job_description.strip():
+        return ""
+
+    sentences = re.split(r"\r?\n+|(?<=[.!?])\s+", job_description)
+    degree_pattern = re.compile(
+        r"\b(?:degree|qualification|education|bachelor|master|phd|doctorate|"
+        r"undergraduate|postgraduate|academic|major|field of study)\b",
+        re.IGNORECASE,
+    )
+    return " ".join(sentence.strip() for sentence in sentences if sentence.strip() and not degree_pattern.search(sentence))
+
+
 def detect_explicit_specialization(job_description):
     if not job_description or not job_description.strip():
         return []
 
-    cleaned = job_description.lower()
+    cleaned = extract_specialization_text(job_description).lower()
     for phrase in GENERIC_AI_EXCLUDES:
         cleaned = cleaned.replace(phrase, " ")
 
@@ -250,6 +264,12 @@ def detect_explicit_specialization(job_description):
 
     if re.search(r"\bdata\s+engineering\b|\bdata\s+engineer\b", cleaned):
         return ["Data Engineering"]
+
+    if re.search(r"\bresearch\s+analyst\b", cleaned) and re.search(
+        r"\b(?:business\s+)?operations?\b|\bdata\s+analysis\b|\bdata\s+modeling\b",
+        cleaned,
+    ):
+        return ["Business Analytics"]
 
     if re.search(
         r"\bdata\s+pipelines?\b|\b(?:PySpark|Spark\s+SQL)\b|\bdata\s+warehous(?:e|ing)\b|\bELT\b",
@@ -315,7 +335,8 @@ def predict_specialization(job_description):
 
     if specialization_model is not None and specialization_vectorizer is not None:
         try:
-            text_vector = specialization_vectorizer.transform([job_description])
+            cleaned_description = extract_specialization_text(job_description)
+            text_vector = specialization_vectorizer.transform([cleaned_description])
             probabilities = specialization_model.predict_proba(text_vector)[0]
             best_index = probabilities.argmax()
             predicted_specialization = str(specialization_model.classes_[best_index])
