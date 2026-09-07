@@ -219,7 +219,7 @@ def predict_education_ml(text, min_confidence=0.20):
 def normalize_linkedin_job_url(url):
     if not url:
         return "N/A"
-    match = re.search(r"/jobs/view/(\d{6,})(?:[/?#]|$)", str(url), flags=re.I)
+    match = re.search(r"/jobs/view/[^/?#]*?(\d{6,})(?:[/?#]|$)", str(url), flags=re.I)
     if match:
         return f"https://www.linkedin.com/jobs/view/{match.group(1)}/"
     return url.split("?")[0].split("#")[0].rstrip("/") + "/"
@@ -230,6 +230,43 @@ def get_canonical_job_id(url):
     if match:
         return f"linkedin_{match.group(1)}"
     return f"linkedin_unknown_{hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:15]}"
+
+
+def _get_first_text(container, selectors):
+    for selector in selectors:
+        values = container.css(f"{selector}::text").getall()
+        text = " ".join(str(value).strip() for value in values if str(value).strip())
+        if text:
+            return text
+    return ""
+
+
+def extract_job_location(container):
+    return _get_first_text(container, [
+        ".job-search-card__location",
+        ".base-search-card__metadata",
+        ".top-card-layout__second-subline",
+        ".top-card__flavor--bullet",
+    ]) or "Not Specified"
+
+
+def extract_posted_time(container):
+    for selector in [
+        ".job-search-card__listdate",
+        ".base-search-card__listdate",
+        ".posted-time-ago__text",
+        "time",
+    ]:
+        element = container.css(selector)
+        if not element:
+            continue
+        datetime_value = element[0].attrib.get("datetime", "")
+        if datetime_value:
+            return datetime_value.strip()
+        text = _get_first_text(container, [selector])
+        if text:
+            return text
+    return "Not Specified"
 
 # ============================================================
 # HTTP FETCH & WORKER PIPELINE
@@ -259,12 +296,16 @@ def safe_fetch_get(url, is_stealth=False, max_retries=3):
 def fetch_single_job_hybrid(job):
     full_description = ""
     company = job.get("company", "")
+    location = job.get("location", "Not Specified")
+    posted_time = job.get("posted_time", "Not Specified")
     
     # 1. Fetch Job Details from LinkedIn
     try:
         time.sleep(random.uniform(1.0, 2.5))
         detail_response = safe_fetch_get(job["link"], is_stealth=False)
         if detail_response:
+            location = extract_job_location(detail_response) if location == "Not Specified" else location
+            posted_time = extract_posted_time(detail_response) if posted_time == "Not Specified" else posted_time
             container = detail_response.css(".show-more-less-html__markup") or detail_response.css(".description__text")
             if container:
                 full_description = " ".join(str(t).strip() for t in container.css("::text").getall() if str(t).strip())
@@ -286,11 +327,12 @@ def fetch_single_job_hybrid(job):
         "category": job.get("category", ""),
         "title": job.get("title", ""),
         "company": company or "N/A",
-        "city": job.get("city", ""),
+        "city": location,
         "state": job.get("state", ""),
         "country": job.get("country", ""),
         "source": "LinkedIn",
-        "timestamp": job.get("timestamp", ""),
+        "collected_at": job.get("collected_at", ""),
+        "posted_time": posted_time,
         "link": job.get("link", ""),
         "full_description": full_description or "N/A",
         "skills": skills,
@@ -351,7 +393,7 @@ def export_current_jobs_to_csv(jobs):
                 "Specialization Required": job.get("specialization_required", ""),
                 "Min Exp (Years)": job.get("min_experience_years", ""),
                 "Max Exp (Years)": job.get("max_experience_years", ""),
-                "Posted Time": job.get("timestamp", ""),
+                "Posted Time": job.get("posted_time", "Not Specified"),
                 "Job Link": job.get("link", ""),
                 "Full Description": job.get("full_description", ""),
             })
@@ -412,10 +454,11 @@ if __name__ == "__main__":
                     "category": keyword,
                     "title": card.css(".base-search-card__title::text").get(default="").strip(),
                     "company": card.css("h4.base-search-card__subtitle a::text").get(default="").strip(),
-                    "city": "India",
+                    "location": extract_job_location(card),
                     "state": "",
                     "country": "India",
-                    "timestamp": datetime.now().strftime("%d-%m-%Y %H:%M"),
+                    "posted_time": extract_posted_time(card),
+                    "collected_at": datetime.now().isoformat(timespec="seconds"),
                     "link": link,
                 })
                 keyword_count += 1

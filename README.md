@@ -204,6 +204,7 @@ Check installed dependencies:
 ## Notes
 
 - LinkedIn may limit, block, or change search results and HTML selectors.
-- `Main.py` records the collection timestamp; it does not currently extract LinkedIn's original posting timestamp.
-- Location fields are populated from the current scraper configuration and may require additional parsing for exact city/state values.
+- `Main.py` extracts the LinkedIn location from search/detail-page metadata and stores it in the existing `City` CSV column for backward compatibility.
+- `Posted Time` now uses LinkedIn's posting metadata when available, including the `datetime` attribute on `time` elements; missing metadata is recorded as `Not Specified`.
+- The current CSV schema is preserved so existing exports remain readable.
 - Unknown skills can be added to `SKILL_CATALOG` in `ml_predictor.py` or discovered dynamically when they appear in skill-oriented text.
