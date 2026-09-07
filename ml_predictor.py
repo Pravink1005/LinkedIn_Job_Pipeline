@@ -116,6 +116,60 @@ def _skill_pattern(alias):
     return rf"(?<!\w){escaped}(?!\w)"
 
 
+DISCOVERY_PREFIXES = re.compile(
+    r"^\s*(?:(?:required|preferred|mandatory|nice\s+to\s+have)\s+)?"
+    r"(?:skills?|technologies?|tools?|platforms?|frameworks?|knowledge|"
+    r"proficiency|experience|familiarity|hands[- ]on experience|using|including)"
+    r"\s*(?:with|in|of|on|such as|like)?\s*[:\-]?\s*",
+    re.IGNORECASE,
+)
+DISCOVERY_ACTIONS = {
+    "apply", "build", "collaborate", "contribute", "create", "develop",
+    "design", "ensure", "implement", "integrate", "maintain", "manage",
+    "optimize", "participate", "perform", "provide", "support", "use",
+    "write",
+}
+DISCOVERY_STOP_WORDS = {
+    "and", "or", "the", "a", "an", "of", "with", "in", "on", "to",
+    "experience", "knowledge", "proficiency", "familiarity", "skills",
+    "tools", "platforms", "systems", "solutions", "development", "working",
+    "team", "teams", "clients", "customers", "business", "technology",
+    "skills", "skill", "communication", "teamwork",
+}
+
+
+def _discover_skill_candidates(text):
+    candidates = []
+    lines = re.split(r"\r?\n+", str(text))
+    for line in lines:
+        line = re.sub(r"^[\s*•▪◦\-]+", "", line).strip()
+        if not line:
+            continue
+        is_bullet = bool(re.match(r"^[\s*•▪◦\-]+", line))
+        prefix_match = DISCOVERY_PREFIXES.match(line)
+        if not prefix_match and not is_bullet:
+            continue
+        content = DISCOVERY_PREFIXES.sub("", line, count=1) if prefix_match else line
+        for candidate in re.split(r",|;|\s+and\s+|\s+or\s+", content, flags=re.IGNORECASE):
+            candidate = re.sub(r"\([^)]*\)", "", candidate)
+            candidate = re.sub(r"[^A-Za-z0-9+#./ -]", " ", candidate).strip(" .:-")
+            words = candidate.split()
+            if not words or len(words) > 5 or len(candidate) > 50:
+                continue
+            if words[0].lower() in DISCOVERY_ACTIONS:
+                candidate = " ".join(words[1:]).strip()
+                words = candidate.split()
+            if not candidate or words[0].lower() in DISCOVERY_ACTIONS:
+                continue
+            if all(word.lower() in DISCOVERY_STOP_WORDS for word in words):
+                continue
+            if any(word.lower() in {"strong", "excellent", "preferred", "required", "ability"} for word in words):
+                continue
+            if candidate.lower() not in {item.lower() for item in candidates}:
+                candidates.append(candidate)
+    return candidates
+
+
 def extract_skills_structured(text):
     if not text or text == "N/A":
         return {}
@@ -132,6 +186,19 @@ def extract_skills_structured(text):
                 matches[skill] = evidence
         if matches:
             structured[category] = matches
+
+    known_skills = {
+        skill.lower()
+        for skills in structured.values()
+        for skill in skills
+    }
+    discovered = {
+        candidate: candidate
+        for candidate in _discover_skill_candidates(text)
+        if candidate.lower() not in known_skills
+    }
+    if discovered:
+        structured["discovered_skills"] = discovered
     return structured
 
 
@@ -161,14 +228,22 @@ def extract_experience_years(text):
         re.IGNORECASE,
     )
     company_context = re.compile(
-        r"\b(?:founded|established|company history|years?\s+in\s+business|"
+        r"\b(?:company|companies|founded|established|company history|years?\s+in\s+business|"
         r"operating|serving|organization|employees|revenue|industry)\b",
+        re.IGNORECASE,
+    )
+    company_age_context = re.compile(
+        rf"\b(?:with|over|more\s+than|has|have)\s+{number}\s+years?\s+of\s+experience\b",
         re.IGNORECASE,
     )
     sentences = re.split(r"\r?\n+|(?<=[.!?])\s+", normalized_text)
 
     for sentence in sentences:
-        if not candidate_context.search(sentence) or company_context.search(sentence):
+        if (
+            not candidate_context.search(sentence)
+            or company_context.search(sentence)
+            or company_age_context.search(sentence)
+        ):
             continue
         for pattern in patterns:
             match = re.search(pattern, sentence, re.IGNORECASE)

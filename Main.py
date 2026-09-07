@@ -364,8 +364,10 @@ def export_current_jobs_to_csv(jobs):
 # ============================================================
 
 if __name__ == "__main__":
-    search_keywords = ["Data Analyst", "Data Engineer", "Data Science"]
+    search_keywords = ["Full Stack Developer", "Java Developer", "Spring Boot Developer", "Node.js Developer", "react developer"]
     location = "India"
+    max_jobs_per_keyword = 100
+    jobs_per_page = 25
     jobs_buffer = []
     seen_listings = load_seen_jobs()
     queued_job_ids = set()
@@ -375,36 +377,51 @@ if __name__ == "__main__":
     for keyword in search_keywords:
         formatted_keyword = keyword.replace(" ", "%20")
         formatted_location = location.replace(" ", "%20")
-        search_url = f"https://www.linkedin.com/jobs/search/?keywords={formatted_keyword}&location={formatted_location}&f_TPR=r3600&start=0"
-        
-        response = safe_fetch_get(search_url, is_stealth=False)
-        if not response:
-            continue
+        keyword_count = 0
+        for start in range(0, max_jobs_per_keyword, jobs_per_page):
+            search_url = (
+                f"https://www.linkedin.com/jobs/search/?keywords={formatted_keyword}"
+                f"&location={formatted_location}&f_TPR=r43200&start={start}"
+            )
 
-        job_cards = response.css(".job-search-card")
-        for card in job_cards[:5]:  # Limit cards per query during test run
-            link_el = card.css("a.base-card__full-link")
-            if not link_el:
-                continue
-            
-            link = normalize_linkedin_job_url(link_el[0].attrib.get("href", ""))
-            job_id = get_canonical_job_id(link)
-            
-            if not job_id or job_id in seen_listings or job_id in queued_job_ids:
-                continue
+            response = safe_fetch_get(search_url, is_stealth=False)
+            if not response:
+                break
 
-            queued_job_ids.add(job_id)
-            jobs_buffer.append({
-                "job_id": job_id,
-                "category": keyword,
-                "title": card.css(".base-search-card__title::text").get(default="").strip(),
-                "company": card.css("h4.base-search-card__subtitle a::text").get(default="").strip(),
-                "city": "India",
-                "state": "",
-                "country": "India",
-                "timestamp": datetime.now().strftime("%d-%m-%Y %H:%M"),
-                "link": link,
-            })
+            job_cards = response.css(".job-search-card")
+            if not job_cards:
+                break
+
+            for card in job_cards:
+                if keyword_count >= max_jobs_per_keyword:
+                    break
+
+                link_el = card.css("a.base-card__full-link")
+                if not link_el:
+                    continue
+
+                link = normalize_linkedin_job_url(link_el[0].attrib.get("href", ""))
+                job_id = get_canonical_job_id(link)
+
+                if not job_id or job_id in seen_listings or job_id in queued_job_ids:
+                    continue
+
+                queued_job_ids.add(job_id)
+                jobs_buffer.append({
+                    "job_id": job_id,
+                    "category": keyword,
+                    "title": card.css(".base-search-card__title::text").get(default="").strip(),
+                    "company": card.css("h4.base-search-card__subtitle a::text").get(default="").strip(),
+                    "city": "India",
+                    "state": "",
+                    "country": "India",
+                    "timestamp": datetime.now().strftime("%d-%m-%Y %H:%M"),
+                    "link": link,
+                })
+                keyword_count += 1
+
+            if len(job_cards) < jobs_per_page:
+                break
 
     # Multithreaded Processing
     processed_jobs = []
