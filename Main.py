@@ -56,23 +56,39 @@ def get_random_headers():
 # PERSISTENT DEDUPLICATION TRACKER
 # ============================================================
 
-CSV_OUTPUT_DIR = "csv_output"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_OUTPUT_DIR = os.path.join(BASE_DIR, "csv_output")
 CURRENT_JOBS_CSV = os.path.join(CSV_OUTPUT_DIR, "current_jobs.csv")
 SEEN_JOBS_FILE = os.path.join(CSV_OUTPUT_DIR, "seen_job_ids.json")
 
 def load_seen_jobs():
+    seen_jobs = set()
     if os.path.exists(SEEN_JOBS_FILE):
         try:
             with open(SEEN_JOBS_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
-        except Exception:
-            return set()
-    return set()
+                seen_jobs.update(json.load(f))
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"[Deduplication Warning] Could not read {SEEN_JOBS_FILE}: {error}")
+
+    if os.path.exists(CURRENT_JOBS_CSV):
+        try:
+            with open(CURRENT_JOBS_CSV, "r", newline="", encoding="utf-8-sig") as f:
+                seen_jobs.update(
+                    row["Job ID"]
+                    for row in csv.DictReader(f)
+                    if row.get("Job ID")
+                )
+        except (OSError, csv.Error) as error:
+            print(f"[Deduplication Warning] Could not read {CURRENT_JOBS_CSV}: {error}")
+
+    return seen_jobs
 
 def save_seen_jobs(seen_set):
     os.makedirs(CSV_OUTPUT_DIR, exist_ok=True)
-    with open(SEEN_JOBS_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(seen_set), f, indent=2)
+    temp_file = f"{SEEN_JOBS_FILE}.tmp"
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(sorted(seen_set), f, indent=2)
+    os.replace(temp_file, SEEN_JOBS_FILE)
 
 # ============================================================
 # FEATURE ENGINEERING & QUALIFICATION EXTRACTION
@@ -266,11 +282,16 @@ def safe_fetch_get(url, is_stealth=False, max_retries=3):
                 response = StealthyFetcher.fetch(url, headless=True, network_idle=True, headers=headers)
             else:
                 response = Fetcher.get(url, headers=headers)
-            if getattr(response, "status", 200) == 429:
+            status = getattr(response, "status", None)
+            if status is None or not 200 <= status < 300:
+                if status not in {429, 500, 502, 503, 504}:
+                    print(f"[HTTP Error] {url} returned status {status}")
+                    return None
                 time.sleep(2.0 * (2 ** attempt))
                 continue
             return response
-        except Exception:
+        except Exception as error:
+            print(f"[Fetch Error] Attempt {attempt + 1}/{max_retries} for {url}: {error}")
             time.sleep(1.5)
     return None
 

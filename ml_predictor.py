@@ -1,10 +1,6 @@
 from pathlib import Path
 import re
-import warnings
 import joblib
-
-
-warnings.filterwarnings("ignore", category=Warning)
 
 
 # ==============================
@@ -22,7 +18,8 @@ MODEL_DIR = BASE_DIR / "models"
 def safe_load_model(path):
     try:
         return joblib.load(path)
-    except Exception:
+    except Exception as error:
+        print(f"[ML Model Error] Failed to load {path}: {error}")
         return None
 
 
@@ -91,11 +88,13 @@ DEGREE_PATTERNS = {
     "Any Bachelor's Degree": [
         r"\bBachelor'?s\s+or\s+Master'?s\s+degree\b",
         r"\bBachelor'?s\s+or\s+associate\s+degree\b",
+        r"\bBachelor(?:'s)?\s+degree\b",
         r"\bBachelor'?s\s+degree\b",
         r"\bBachelor'?s\s+qualification\b",
         r"\bAny\s+recognized\s+Bachelor'?s\s+degree\b",
     ],
     "Any Master's Degree": [
+        r"\bMaster(?:'s)?\s+degree\b",
         r"\bMaster'?s\s+degree\b",
         r"\bMaster'?s\s+qualification\b",
         r"\bAny\s+recognized\s+Master'?s\s+degree\b",
@@ -211,11 +210,29 @@ SPECIALIZATION_PATTERNS = [
 # HELPER FUNCTIONS
 # ==============================
 
+def extract_degree_text(job_description):
+    if not job_description or not job_description.strip():
+        return ""
+
+    normalized_description = job_description.replace("’", "'").replace("‘", "'")
+    sentences = re.split(r"\r?\n+|(?<=[.!?])\s+", normalized_description)
+    degree_pattern = re.compile(
+        r"\b(?:degree\b(?!-)|qualification|education|bachelor(?:'s)?(?=\s+(?:degree|in|of|or))|master(?:'s)?(?=\s+(?:degree|in|of|or))|phd|doctorate|"
+        r"undergraduate|postgraduate|academic|major|field of study)\b",
+        re.IGNORECASE,
+    )
+    return " ".join(
+        sentence.strip()
+        for sentence in sentences
+        if sentence.strip() and degree_pattern.search(sentence)
+    )
+
+
 def detect_explicit_degree(job_description):
     if not job_description or not job_description.strip():
         return []
 
-    normalized_description = job_description.replace("’", "'").replace("‘", "'")
+    normalized_description = extract_degree_text(job_description)
     found = []
     for degree, patterns in DEGREE_PATTERNS.items():
         for pattern in patterns:
@@ -262,6 +279,12 @@ def detect_explicit_specialization(job_description):
     if re.search(r"\blooking\s+for\s+(?:a\s+)?data\s+analyst\b", cleaned):
         return ["Data Analyst"]
 
+    if re.search(
+        r"\b(?:python|java|software|backend|full[- ]stack)\s+developer\b|\bsoftware\s+engineer\b",
+        cleaned,
+    ):
+        return ["Software Engineering"]
+
     if re.search(r"\bdata\s+engineering\b|\bdata\s+engineer\b", cleaned):
         return ["Data Engineering"]
 
@@ -306,16 +329,23 @@ def predict_degree(job_description):
     if explicit:
         return " / ".join(explicit)
 
+    degree_text = extract_degree_text(job_description)
+    if degree_text and re.search(r"\bdegree\s+in\b", degree_text, re.IGNORECASE):
+        return "Not Specified"
+
     if degree_model is not None and degree_vectorizer is not None:
         try:
-            text_vector = degree_vectorizer.transform([job_description])
+            if not degree_text:
+                return "Not Specified"
+            text_vector = degree_vectorizer.transform([degree_text])
             probabilities = degree_model.predict_proba(text_vector)[0]
             best_index = probabilities.argmax()
             predicted_degree = str(degree_model.classes_[best_index])
             confidence = probabilities[best_index] * 100
             if confidence >= 60:
                 return predicted_degree
-        except Exception:
+        except Exception as error:
+            print(f"[ML Prediction Error] Degree inference failed: {error}")
             pass
 
     return "Not Specified"
@@ -343,7 +373,8 @@ def predict_specialization(job_description):
             confidence = probabilities[best_index] * 100
             if confidence >= 60:
                 return predicted_specialization
-        except Exception:
+        except Exception as error:
+            print(f"[ML Prediction Error] Specialization inference failed: {error}")
             pass
 
     return "Not Specified"
